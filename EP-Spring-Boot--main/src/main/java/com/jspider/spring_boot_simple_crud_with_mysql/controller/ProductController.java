@@ -102,6 +102,12 @@ public class ProductController {
 	}
 
 	@GetMapping(value = "/search")
+	@Operation(description = "Search products by name with partial, case-insensitive matching",
+	responses = {
+			@ApiResponse(responseCode = "200", description = "Products matching the search criteria"),
+			@ApiResponse(responseCode = "400", description = "Missing required name parameter"),
+			@ApiResponse(responseCode = "500", description = "Internal server error") }
+	)
 	public ResponseEntity<List<Product>> searchProductByName(@RequestParam(name = "name") String name) {
 		log.info("Search request received for name: {}", name);
 		List<Product> products = productDao.searchProductByNameDao(name);
