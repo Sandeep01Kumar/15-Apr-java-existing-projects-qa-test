@@ -1,13 +1,13 @@
-# 🛒 Product API : Spring Boot CRUD with MySQL
+# 🛒 Product API : Spring Boot CRUD with H2
 
-🚀 A robust and scalable Spring Boot-based RESTful API project designed to perform *CRUD operations on Product entities, integrated with **MySQL*, using clean architecture and modular design for better maintainability and scalability,
+🚀 A robust and scalable Spring Boot-based RESTful API project designed to perform *CRUD operations on Product entities, integrated with **H2 in-memory database*, using clean architecture and modular design for better maintainability and scalability,
 
 ---
 
 ## 🎯 Objectives
 
 - ✅ Develop RESTful APIs using Spring Boot  
-- ✅ Perform end-to-end CRUD operations with MySQL database  
+- ✅ Perform end-to-end CRUD operations with H2 in-memory database  
 - ✅ Implement clean separation of concerns (Controller, DAO, Entity, Repository)  
 - ✅ Ensure structured project architecture following best practices  
 - ✅ Scalable codebase for real-time backend development and integration  
@@ -30,7 +30,7 @@ spring-boot-simple-crud-with-mysql
 │   │       ├── dao
 │   │       │   └── ProductDao.java               # Business logic layer for product operations
 │   │       ├── entity
-│   │       │   └── Product.java                  # Entity mapped to MySQL DB table
+│   │       │   └── Product.java                  # Entity mapped to H2 database table
 │   │       ├── repository
 │   │       │   └── ProductRepository.java        # JPA Repository interface
 │   │       ├── responses
@@ -38,14 +38,11 @@ spring-boot-simple-crud-with-mysql
 │   │       └── SpringBootSimpleCrudWithMysqlApplication.java  # Main class
 │
 │   ├── main/resources
-│   │   ├── application.properties                # DB config and server settings
-│   │   ├── static                                # Static files (optional for front-end)
-│   │   └── templates                             # Thymeleaf templates (if used)
+│   │   └── application.properties                # DB config and server settings
 │
 │   └── test/java                                 # Unit and integration tests (to be added)
 │
 ├── pom.xml                                       # Maven dependencies and plugins
-├── HELP.md                                       # Spring generated project help
 ├── mvnw, mvnw.cmd                                # Maven wrapper
 ├── target                                        # Compiled build output
 </pre>
@@ -65,7 +62,7 @@ spring-boot-simple-crud-with-mysql
 - *Java 17* – Backend programming language  
 - *Spring Boot* – Backend framework for building APIs  
 - *Spring Data JPA* – ORM for database interaction  
-- *MySQL* – Relational database for persistent storage  
+- *H2 Database* – In-memory database for lightweight persistent storage  
 - *Maven* – Project management and dependency tool  
 - *Eclipse IDE / IntelliJ IDEA* – Development environment  
 - *Postman* – API testing  
@@ -78,7 +75,7 @@ spring-boot-simple-crud-with-mysql
 - ✅ *RESTful API Design* using Spring Boot  
 - ✅ *Modular Architecture* with clear separation of concerns  
 - ✅ *CRUD Functionality*: Create, Read, Update, Delete for products  
-- ✅ *Database Integration* using Spring Data JPA and MySQL  
+- ✅ *Database Integration* using Spring Data JPA and H2  
 - ✅ *Custom Response Wrapping* using ResponseStructure.java  
 - ✅ *Scalable Project Template* for enterprise-level apps  
 - ✅ *Maven-Based Build* and dependency management  
@@ -87,14 +84,14 @@ spring-boot-simple-crud-with-mysql
 
 ## 📦 API Endpoints
 
-| Method | Endpoint                       | Description                                         |
-|--------|--------------------------------|-----------------------------------------------------|
-| POST   | /products                      | Create a new product                                |
-| GET    | /products                      | Get all products                                    |
-| GET    | /products/{id}                 | Get a product by ID                                 |
-| PUT    | /products/{id}                 | Update product by ID                                |
-| DELETE | /products/{id}                 | Delete product by ID                                |
-| GET    | /product/search?name={name}    | Search products by name (partial, case-insensitive) |
+| Method | Endpoint                              | Description                                         |
+|--------|---------------------------------------|-----------------------------------------------------|
+| POST   | /product/saveProduct                  | Create a new product                                |
+| GET    | /product/findAllProduct               | Get all products                                    |
+| GET    | /product/getProduct/{id}              | Get a product by ID                                 |
+| PUT    | /product/updateProduct/{id}           | Update product by ID                                |
+| DELETE | /product/deleteProductByPrice/{price} | Delete product by price                             |
+| GET    | /product/search?name={name}           | Search products by name (partial, case-insensitive) |
 
 ---
  
