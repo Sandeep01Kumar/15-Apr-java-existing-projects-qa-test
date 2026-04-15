@@ -13,6 +13,8 @@ import com.jspider.spring_boot_simple_crud_with_mysql.entity.Product;
 public interface ProductRepository extends JpaRepository<Product, Integer> {
 
 	List<Product> findByName(String name);
+
+	List<Product> findByNameContainingIgnoreCase(String name);
 	
 	@Query(value = "select * from product where price=?",nativeQuery = true)
 	List<Product> getProductByPrice(double price);
