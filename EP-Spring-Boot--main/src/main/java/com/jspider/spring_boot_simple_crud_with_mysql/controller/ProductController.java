@@ -15,6 +15,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.jspider.spring_boot_simple_crud_with_mysql.dao.ProductDao;
 import com.jspider.spring_boot_simple_crud_with_mysql.entity.Product;
@@ -29,6 +32,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 @CrossOrigin(value = "")
 @Tag(name = "productcontroller", description = "this is controller class")
 public class ProductController {
+
+	private static final Logger log = LoggerFactory.getLogger(ProductController.class);
 
 	@Autowired
 	ProductDao productDao;
@@ -94,6 +99,13 @@ public class ProductController {
 	@GetMapping(value = "/getProductByName/{name}")
 	public List<Product> getProductByNameDao(@PathVariable(name = "name") String name) {
 		return productDao.getProductByNameDao(name);
+	}
+
+	@GetMapping(value = "/search")
+	public ResponseEntity<List<Product>> searchProductByName(@RequestParam(name = "name") String name) {
+		log.info("Search request received for name: {}", name);
+		List<Product> products = productDao.searchProductByNameDao(name);
+		return ResponseEntity.ok(products);
 	}
 
 	@GetMapping(value = "/getProductByPrice/{price}")
