@@ -87,13 +87,14 @@ spring-boot-simple-crud-with-mysql
 
 ## 📦 API Endpoints
 
-| Method | Endpoint              | Description                |
-|--------|-----------------------|----------------------------|
-| POST   | /products           | Create a new product       |
-| GET    | /products           | Get all products           |
-| GET    | /products/{id}      | Get a product by ID        |
-| PUT    | /products/{id}      | Update product by ID       |
-| DELETE | /products/{id}      | Delete product by ID       |
+| Method | Endpoint                       | Description                                         |
+|--------|--------------------------------|-----------------------------------------------------|
+| POST   | /products                      | Create a new product                                |
+| GET    | /products                      | Get all products                                    |
+| GET    | /products/{id}                 | Get a product by ID                                 |
+| PUT    | /products/{id}                 | Update product by ID                                |
+| DELETE | /products/{id}                 | Delete product by ID                                |
+| GET    | /product/search?name={name}    | Search products by name (partial, case-insensitive) |
 
 ---
  
