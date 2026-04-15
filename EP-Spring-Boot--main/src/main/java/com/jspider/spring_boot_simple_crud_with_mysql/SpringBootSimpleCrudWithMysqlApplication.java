@@ -14,8 +14,8 @@ import io.swagger.v3.oas.annotations.info.Info;
 				description = "we perform crud operartion with mysql db",
 				version = "1.0.0",
 				contact = @Contact(
-						name = "Sudhir Yadav ",
-						email = "qasudhir@gmail.com",
+						name = "",
+						email = "",
 						url = "https://www.w3schools.com/"
 						)
 				)
