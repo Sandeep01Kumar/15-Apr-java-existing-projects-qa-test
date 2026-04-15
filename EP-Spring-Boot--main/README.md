@@ -120,7 +120,6 @@ spring-boot-simple-crud-with-mysql
 
 ![WhatsApp Image 2025-05-23 at 20 35 39_0a1c84f6](https://github.com/user-attachments/assets/583fea34-e73b-4939-842b-25bab2de5298)
 
-🔗 Automation Testing Repo: [https://github.com/Sudhir3456/myspringboot-mysql-crud-rest-api-automation]
  
 
 
