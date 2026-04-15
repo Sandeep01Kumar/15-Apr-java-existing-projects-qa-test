@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Repository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -16,6 +18,8 @@ import com.jspider.spring_boot_simple_crud_with_mysql.repository.ProductReposito
 
 @Repository
 public class ProductDao {
+
+	private static final Logger log = LoggerFactory.getLogger(ProductDao.class);
 
 	@Autowired
 	ProductRepository productRepository;
@@ -44,6 +48,13 @@ public class ProductDao {
 		
 		return productRepository.findByName(name);
 
+	}
+
+	public List<Product> searchProductByNameDao(String name) {
+		log.info("Searching products by name: {}", name);
+		List<Product> products = productRepository.findByNameContainingIgnoreCase(name);
+		log.info("Found {} products matching name: {}", products.size(), name);
+		return products;
 	}
 	
 	public List<Product> getProductByPriceDao(double price){
