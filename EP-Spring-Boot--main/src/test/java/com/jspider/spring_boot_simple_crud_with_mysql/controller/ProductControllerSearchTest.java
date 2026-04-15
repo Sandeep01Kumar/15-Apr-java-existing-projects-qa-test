@@ -6,7 +6,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -17,7 +16,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -30,7 +29,7 @@ import com.jspider.spring_boot_simple_crud_with_mysql.responses.ResponseStructur
  *
  * <p>Uses Spring Boot's {@code @WebMvcTest} test slicing to load only the web layer
  * for {@code ProductController}. The DAO layer and ResponseStructure component are
- * mocked via {@code @MockBean} to isolate the controller from the persistence layer.</p>
+ * mocked via {@code @MockitoBean} to isolate the controller from the persistence layer.</p>
  *
  * <p>Tests cover:</p>
  * <ul>
@@ -45,10 +44,10 @@ class ProductControllerSearchTest {
 	@Autowired
 	private MockMvc mockMvc;
 
-	@MockBean
+	@MockitoBean
 	private ProductDao productDao;
 
-	@MockBean
+	@MockitoBean
 	private ResponseStructure<Product> responseStructure;
 
 	/**
