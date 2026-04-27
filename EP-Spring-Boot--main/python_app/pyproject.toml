@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spring-boot-simple-crud-with-mysql-py"
+version = "0.0.1-SNAPSHOT"
+description = "Demo project for Spring Boot — Python Flask port"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Unspecified" }
+authors = [
+    { name = "jspider" }
+]
+keywords = [
+    "flask",
+    "python",
+    "crud",
+    "mysql",
+    "rest-api",
+    "spring-boot-port",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Flask",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+"Source" = "https://www.w3schools.com/"
+
+# Runtime dependencies are pinned in requirements.txt for reproducibility;
+# pyproject.toml only documents project metadata. (Equivalent of how the
+# Java pom.xml declares dependencies but the actual lock file is mvnw's
+# resolved tree.)
+
+[tool.setuptools]
+# This project is run as a script (`python server.py`), not installed as a
+# package. The `py-modules`/`packages` keys are intentionally omitted to
+# avoid forcing an unnecessary build step.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --strict-markers"

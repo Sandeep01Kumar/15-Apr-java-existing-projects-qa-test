@@ -1,0 +1,67 @@
+# ============================================================================
+# Pinned runtime + test dependencies for the Python (Flask) implementation
+# of the Product CRUD API.
+#
+# Versions are the latest stable releases verified against PyPI in
+# February-April 2026 per AAP §0.4.2 / §0.6.1. Pinning with == ensures
+# reproducible installs (the Python equivalent of Maven's resolved tree).
+#
+# Install with:
+#   pip install -r requirements.txt
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# Web framework — replaces spring-boot-starter-web (Spring MVC + embedded
+# Tomcat). Flask provides the WSGI app, routing, request/response objects,
+# and the Werkzeug development server.
+# ---------------------------------------------------------------------------
+Flask==3.1.3
+
+# ---------------------------------------------------------------------------
+# ORM stack — replaces spring-boot-starter-data-jpa (Hibernate + JPA).
+# Flask-SQLAlchemy is the Pallets-maintained Flask integration; SQLAlchemy
+# is the underlying ORM and SQL expression toolkit.
+# ---------------------------------------------------------------------------
+Flask-SQLAlchemy==3.1.1
+SQLAlchemy==2.0.46
+
+# ---------------------------------------------------------------------------
+# MySQL driver — replaces mysql-connector-j. PyMySQL is a pure-Python driver
+# (no compiled C extension required), used via the SQLAlchemy URL prefix
+# `mysql+pymysql://`.
+# ---------------------------------------------------------------------------
+PyMySQL==1.1.1
+
+# ---------------------------------------------------------------------------
+# OpenAPI / Swagger UI — replaces springdoc-openapi-starter-webmvc-ui:2.8.6.
+# flask-smorest auto-generates an OpenAPI 3.x spec from marshmallow Schemas
+# and Blueprint/MethodView routes, then renders a Swagger UI page.
+# ---------------------------------------------------------------------------
+flask-smorest==0.47.0
+
+# ---------------------------------------------------------------------------
+# Serialization / validation — replaces Lombok @Data + Jackson combo.
+# marshmallow Schemas define JSON-shape contracts and provide field-level
+# validation. flask-smorest depends on marshmallow internally; pinning
+# explicitly here ensures version reproducibility.
+#
+# NOTE: AAP §0.6.1 originally specified marshmallow 3.21.3, but flask-smorest
+# 0.47.0 transitively requires marshmallow>=3.24.1 (resolution conflict
+# observed at install time). We upgrade to the latest 3.x release (3.26.2)
+# to preserve the AAP's intent (stable 3.x line) while satisfying the
+# dependency-resolution constraint enforced by flask-smorest 0.47.0.
+# ---------------------------------------------------------------------------
+marshmallow==3.26.2
+
+# ---------------------------------------------------------------------------
+# Cross-Origin Resource Sharing — replaces Spring @CrossOrigin annotation.
+# Configured in app.py to scope ONLY to /product/* (matches Java behavior).
+# ---------------------------------------------------------------------------
+Flask-Cors==5.0.0
+
+# ---------------------------------------------------------------------------
+# Testing — replaces spring-boot-starter-test (JUnit 5 + Mockito + AssertJ
+# + JsonPath). pytest provides the test runner; Flask's test_client() is
+# used for integration-style endpoint testing.
+# ---------------------------------------------------------------------------
+pytest==8.3.3
