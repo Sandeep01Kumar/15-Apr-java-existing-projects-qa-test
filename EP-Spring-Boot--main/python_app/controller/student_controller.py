@@ -202,11 +202,23 @@ class StudentTodayDate(MethodView):
 #     ``@PostMapping``, but the dispatch is identical. The Python
 #     equivalent is ``MethodView.post``. Using ``get`` would change the
 #     HTTP verb and break parity.
-#   - Both path variables are integers (Werkzeug ``<int:...>`` converter
-#     -> Java ``int`` parameter type). Non-integer path values produce a
-#     404 from Werkzeug's URL routing, mirroring Spring's
-#     ``MethodArgumentTypeMismatchException`` -> 400/404 behavior closely
-#     enough that no client of the Java side would observe a difference.
+#   - Both path variables are integers and MUST accept SIGNED values
+#     (negative integers included) to preserve byte-for-byte parity
+#     with Java's ``@PathVariable int a`` declaration. Java's
+#     ``Integer.parseInt`` accepts ``"-5"`` and produces ``-5``; the
+#     equivalent Werkzeug expression is the converter
+#     ``<int(signed=True):...>`` (the ``signed=True`` parameter has
+#     been a built-in feature of ``IntegerConverter`` since Werkzeug
+#     0.15 — its regex switches from the default unsigned ``\d+`` to
+#     the signed variant ``-?\d+``). Without ``signed=True``, the
+#     default ``<int:...>`` converter rejects URL segments that begin
+#     with ``-`` and Werkzeug returns a 404 before the handler is
+#     invoked — diverging from the Java side, which would compute the
+#     sum normally. Using ``signed=True`` preserves AAP §0.7.2's
+#     "backward compatibility" guarantee that "clients of the Java
+#     service should be able to point at the Python service running on
+#     port 8090 with no client-side changes" — including clients that
+#     happen to POST negative integers.
 #   - The Java method's parameter names are ``a`` and ``b`` (not ``a1``
 #     and ``b1`` — the path-variable annotation supplies the binding via
 #     the ``name`` attribute). The Python signature uses ``a1`` and ``b1``
@@ -219,9 +231,12 @@ class StudentTodayDate(MethodView):
 #     JSON integer literal (e.g., ``7``) with
 #     ``Content-Type: application/json``. Spring's Jackson auto-
 #     serialization of ``int`` produces the same JSON integer literal,
-#     so the wire output is byte-identical.
+#     so the wire output is byte-identical. ``jsonify`` correctly
+#     handles negative integers (``jsonify(-2)`` produces the body
+#     ``-2`` with the same content type), so no special handling is
+#     needed for the signed-integer case.
 # ---------------------------------------------------------------------------
-@blp.route("/addition/<int:a1>/<int:b1>")
+@blp.route("/addition/<int(signed=True):a1>/<int(signed=True):b1>")
 class StudentAddition(MethodView):
     """``POST /student/addition/<a1>/<b1>`` — return the integer sum of two ints.
 
@@ -233,25 +248,42 @@ class StudentAddition(MethodView):
     equivalent. ``def get(self, ...)`` would change the verb and break
     parity.
 
+    Both path variables use Werkzeug's ``<int(signed=True):...>``
+    converter, which accepts both POSITIVE and NEGATIVE integers
+    (regex ``-?\\d+``). The default ``<int:...>`` converter accepts
+    only unsigned values (regex ``\\d+``); using it would cause
+    Werkzeug to return HTTP 404 for URLs containing negative numbers
+    such as ``/student/addition/-5/3``, which would diverge from the
+    Java side's ``Integer.parseInt`` behavior (Java accepts
+    ``"-5"``). The ``signed=True`` parameter preserves AAP §0.7.2's
+    backward-compatibility guarantee for clients that happen to POST
+    negative integers.
+
     Parameters
     ----------
     a1 : int
-        First addend, parsed from the URL ``<int:a1>`` segment.
+        First addend, parsed from the URL ``<int(signed=True):a1>``
+        segment. May be negative.
     b1 : int
-        Second addend, parsed from the URL ``<int:b1>`` segment.
+        Second addend, parsed from the URL ``<int(signed=True):b1>``
+        segment. May be negative.
 
     Returns
     -------
     flask.Response
         A Flask response carrying the JSON integer literal ``a1 + b1``
-        (e.g., ``7`` for ``a1=3, b1=4``) with status 200 and
-        ``Content-Type: application/json``. Matches Spring's Jackson
-        auto-serialization of an ``int`` return value.
+        (e.g., ``7`` for ``a1=3, b1=4``; ``-2`` for ``a1=-5, b1=3``)
+        with status 200 and ``Content-Type: application/json``.
+        Matches Spring's Jackson auto-serialization of an ``int``
+        return value byte-for-byte for both positive and negative
+        sums.
     """
 
     def post(self, a1, b1):
         # Compute the sum and serialize via ``jsonify`` to produce a
         # JSON integer literal as the response body. The body and
         # content type are byte-identical to what Spring produces for
-        # the equivalent Java method.
+        # the equivalent Java method, including for negative results
+        # (``jsonify(-2)`` produces the body ``-2`` with
+        # ``Content-Type: application/json``).
         return jsonify(a1 + b1)

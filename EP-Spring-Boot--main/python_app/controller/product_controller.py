@@ -190,6 +190,29 @@ from datetime import date
 #                        same endpoint
 #                        (``jsonify(ProductSchema().dump(product))``).
 #
+#   * ``Response``    — Flask's WSGI response class (a thin subclass of
+#                        ``werkzeug.wrappers.Response``). Used in the
+#                        F-011 handler (``DELETE
+#                        /product/deleteProductByPrice/<price>``) to
+#                        produce a TRULY EMPTY response body that
+#                        matches Java's ``void`` return semantics
+#                        byte-for-byte. Returning a bare ``""`` string
+#                        from a view decorated with
+#                        ``@blp.response(200)`` causes flask-smorest to
+#                        run the empty string through ``jsonify``,
+#                        which serializes it as ``""\n`` (3 bytes) with
+#                        ``Content-Type: application/json`` — that
+#                        diverges from Java's ``void`` which produces a
+#                        zero-byte body. Returning a pre-built
+#                        ``Response("", status=200)`` instance instead
+#                        is recognized by flask-smorest's
+#                        ``isinstance(result_raw, Response)`` short
+#                        circuit (see flask_smorest 0.47.0
+#                        ``response.py``) and is forwarded as-is,
+#                        producing ``Content-Length: 0`` and an empty
+#                        body — the byte-for-byte parity that AAP
+#                        §0.5.2 requires for F-011.
+#
 #   * ``MethodView``  — the base class for all ten class-based
 #                        handlers in this module. flask-smorest's
 #                        ``Blueprint.route`` decorator inspects the
@@ -206,7 +229,7 @@ from datetime import date
 #                        ``flask`` directly, but ``flask.views`` is the
 #                        documented modern path).
 # ---------------------------------------------------------------------------
-from flask import abort, jsonify
+from flask import Response, abort, jsonify
 from flask.views import MethodView
 
 # ---------------------------------------------------------------------------
@@ -900,9 +923,21 @@ class GetProductByPrice(MethodView):
 #   - The endpoint MUST return HTTP 200 (NOT 204 No Content). Java's
 #     ``void`` return on a Spring controller method maps to HTTP 200
 #     by default.
-#   - The body MUST be empty (matches Java ``void``).
-#   - ``@blp.response(200)`` (without a schema) tells flask-smorest
-#     "this returns 200 with no schema-validated body".
+#   - The body MUST be TRULY EMPTY (Content-Length: 0) to match Java
+#     ``void``. Returning a bare ``""`` string from a view decorated
+#     with ``@blp.response(200)`` causes flask-smorest to JSON-
+#     serialize the empty string as ``""\n`` (3 bytes) with
+#     ``Content-Type: application/json`` — diverging from Java's
+#     zero-byte ``void`` body. Returning a pre-built
+#     ``Response("", status=200)`` instance instead is recognized by
+#     flask-smorest's ``isinstance(result_raw, Response)`` short
+#     circuit (see flask_smorest 0.47.0 ``response.py``) and is
+#     forwarded as-is, producing ``Content-Length: 0`` and an empty
+#     body — the byte-for-byte parity AAP §0.5.2 requires for F-011.
+#   - ``@blp.response(200)`` (without a schema) is preserved so the
+#     OpenAPI document still records "DELETE returns 200" for Swagger
+#     UI. flask-smorest passes Response instances through without
+#     re-serializing, so the decorator is purely documentational here.
 # ===========================================================================
 @blp.route("/deleteProductByPrice/<float:price>")
 class DeleteProductByPrice(MethodView):
@@ -915,9 +950,10 @@ class DeleteProductByPrice(MethodView):
     transaction commit (preserves Java's ``@Modifying`` +
     ``@Transactional`` semantics).
 
-    Returns HTTP 200 with empty body (matches Java's ``void`` return
-    type — Spring renders ``void`` as HTTP 200 with no body, NOT HTTP
-    204 No Content).
+    Returns HTTP 200 with TRULY EMPTY body (``Content-Length: 0``) to
+    match Java's ``void`` return type byte-for-byte. Spring renders
+    ``void`` as HTTP 200 with no body, NOT HTTP 204 No Content; the
+    Python equivalent must produce a zero-byte body with status 200.
 
     Parameters
     ----------
@@ -928,10 +964,12 @@ class DeleteProductByPrice(MethodView):
 
     Returns
     -------
-    str
-        An empty string, which Flask renders as HTTP 200 with
-        ``Content-Length: 0``. Matches the Java ``void`` return type
-        byte-for-byte at the wire level.
+    flask.Response
+        A pre-built Flask ``Response`` instance with an empty body and
+        status 200. flask-smorest's ``@blp.response(200)`` decorator
+        recognizes the ``Response`` instance and passes it through
+        without re-serializing, producing ``Content-Length: 0`` —
+        byte-identical to the Java ``void`` return.
     """
 
     @blp.response(200)
@@ -944,13 +982,20 @@ class DeleteProductByPrice(MethodView):
         # ``@Modifying`` + ``@Transactional`` durability semantic.
         product_dao.delete_product_by_price_dao(price)
 
-        # Java returns ``void`` -> HTTP 200 with empty body. Flask
-        # requires a response object/string/tuple; an empty string
-        # with status 200 produces the equivalent (HTTP 200 +
-        # Content-Length: 0). Returning ``None`` would raise a
-        # TypeError in Flask; returning ``""`` is the canonical way
-        # to express "empty 200 response".
-        return ""
+        # Java returns ``void`` -> HTTP 200 with TRULY EMPTY body
+        # (``Content-Length: 0``). Returning a bare ``""`` here would
+        # be re-serialized by ``@blp.response(200)`` through
+        # ``jsonify`` into ``""\n`` (3 bytes) with
+        # ``Content-Type: application/json`` — diverging from Java's
+        # zero-byte ``void`` body. Returning a pre-built
+        # ``Response("", status=200)`` is recognized by flask-smorest's
+        # ``isinstance(result_raw, Response)`` short circuit (see
+        # flask_smorest 0.47.0 ``response.py``: "If return value is a
+        # werkzeug Response, return it") and is forwarded as-is. The
+        # resulting wire-level response has an empty body and
+        # ``Content-Length: 0`` — byte-for-byte parity with Java's
+        # ``void`` return type as required by AAP §0.5.2.
+        return Response("", status=200)
 
 
 # ===========================================================================
