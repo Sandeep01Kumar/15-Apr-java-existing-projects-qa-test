@@ -79,7 +79,7 @@ from flask_sqlalchemy import SQLAlchemy
 # module-import time. The actual binding to a Flask instance happens
 # inside ``create_app()`` (see ``app.py``):
 #
-#     from python_app.extensions import db
+#     from extensions import db
 #     ...
 #     def create_app(...):
 #         app = Flask(...)
