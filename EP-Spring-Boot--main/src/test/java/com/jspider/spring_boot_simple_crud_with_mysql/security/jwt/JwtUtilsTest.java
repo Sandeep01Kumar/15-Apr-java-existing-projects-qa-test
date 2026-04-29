@@ -48,17 +48,49 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Two Base64-encoded secrets are used, each decoding to 64 bytes
  * (512 bits) &mdash; well above the 32-byte (256-bit) minimum required for
  * HMAC-SHA family algorithms per RFC 7518 &sect;3.2. The 64-byte length is
- * specifically chosen because JJWT 0.13's
- * {@code Jwts.builder().signWith(SecretKey)} auto-selects the strongest
- * secure HMAC algorithm based on key size: a 64-byte key triggers HS512.
- * Holding both secrets at the same byte-length tier guarantees that both
- * signing and verification use the same algorithm, so the
- * signature-mismatch test exercises the genuine HMAC verification failure
- * (caught by {@link JwtUtils#validateJwtToken(String)} as
- * {@code io.jsonwebtoken.security.SignatureException}) rather than a
- * {@code WeakKeyException} thrown before verification can begin. The two
- * secrets contain different byte content, so they produce different HMAC
- * keys and incompatible signatures.
+ * historically chosen for both secrets so that the keys derived by
+ * {@link io.jsonwebtoken.security.Keys#hmacShaKeyFor(byte[])} are at the
+ * same algorithm tier; this avoids any
+ * {@link io.jsonwebtoken.security.WeakKeyException} during the
+ * signature-mismatch test, leaving the JJWT path to surface the genuine
+ * HMAC verification failure (caught by
+ * {@link JwtUtils#validateJwtToken(String)} as
+ * {@code io.jsonwebtoken.security.SignatureException}). The two secrets
+ * contain different byte content, so they produce different HMAC keys and
+ * incompatible signatures.
+ *
+ * <p>The signing algorithm in the issued JWT is always {@code HS256}: as
+ * of the QA-driven fix for AAP &sect;0.1.1, {@code JwtUtils.generateJwtToken}
+ * passes {@link io.jsonwebtoken.Jwts.SIG#HS256} explicitly to
+ * {@code .signWith(SecretKey, MacAlgorithm)}, overriding JJWT's default
+ * algorithm-from-key-length auto-selection. The chosen 64-byte secret no
+ * longer affects which {@code "alg"} header the token carries; it only
+ * affects how many bytes of key material are used by the underlying
+ * {@code Keys.hmacShaKeyFor} factory. The 64-byte length is preserved here
+ * for backward compatibility of the test secret literals only.
+ *
+ * <h2>Cache-invalidation after reflective field mutation</h2>
+ *
+ * <p>Production-grade {@code JwtUtils} caches the derived
+ * {@link javax.crypto.SecretKey} in a {@code signingKey} field initialized
+ * by a {@link jakarta.annotation.PostConstruct @PostConstruct}-annotated
+ * {@code init()} method. In a Spring-managed deployment the cache is
+ * populated before any request reaches the bean, providing the AAP
+ * &sect;0.7.1.4 fail-fast guarantee on weak/missing secrets. Stand-alone
+ * unit tests, however, instantiate {@code JwtUtils} via
+ * {@code new JwtUtils()} and never invoke {@code init()}, so the
+ * {@code signingKey} field is initially {@code null}; the
+ * {@link JwtUtils#key() key} accessor's lazy fallback then derives and
+ * caches the key on first use.
+ *
+ * <p>That lazy cache must be invalidated whenever a test reflectively
+ * mutates {@code jwtSecret}, otherwise the next token operation would
+ * use the stale cached key derived from the previous secret. Both
+ * {@link #setUp()} and {@link #validateJwtToken_invalidSignature_returnsFalse()}
+ * therefore pair their {@code ReflectionTestUtils.setField("jwtSecret", ...)}
+ * calls with a {@code ReflectionTestUtils.setField("signingKey", null)}
+ * cache-clear so the next access re-derives the key from the current
+ * {@code jwtSecret} value.
  *
  * <h2>Test method naming</h2>
  *
@@ -107,6 +139,14 @@ class JwtUtilsTest {
         ReflectionTestUtils.setField(jwtUtils, "jwtSecret",
                 "dGVzdC1qd3Qtc2VjcmV0LWtleS1mb3ItdW5pdC10ZXN0aW5nLW9ubHktbm90LWZvci1wcm9kdWN0aW9uLXVzZQ==");
         ReflectionTestUtils.setField(jwtUtils, "jwtExpirationMs", 3600000);
+        // Reset the cached signing key so JwtUtils.key() lazily re-derives it
+        // from the just-assigned jwtSecret on first use. Without this, a
+        // previous test that may have populated signingKey under the
+        // PER_METHOD JUnit lifecycle would still be safe (a fresh JwtUtils
+        // instance starts with signingKey == null), but the explicit reset
+        // documents the cache contract and protects against future
+        // refactors that might lift fixture state into a class-level field.
+        ReflectionTestUtils.setField(jwtUtils, "signingKey", null);
     }
 
     /**
@@ -180,10 +220,11 @@ class JwtUtilsTest {
      *
      * <p>This is the happy-path test: the secret used to sign the token and
      * the secret used to verify it are identical (because they are derived
-     * from the same {@code jwtSecret} field), the signing and verifying
-     * algorithms match (HS512 in both cases for this test's 64-byte key,
-     * because JJWT 0.13.x's {@code Jwts.builder().signWith(SecretKey)}
-     * auto-selects the strongest secure HMAC algorithm based on key size),
+     * from the same {@code jwtSecret} field), the signing algorithm is
+     * {@code HS256} (explicitly pinned by
+     * {@code Jwts.builder().signWith(SecretKey, Jwts.SIG.HS256)} per the
+     * AAP &sect;0.1.1 contract), the verifying parser accepts any
+     * algorithm-key combination consistent with the cached signing key,
      * and the {@code exp} claim is one hour in the future.
      */
     @Test
@@ -252,23 +293,31 @@ class JwtUtilsTest {
      * <p>The test:
      * <ol>
      *   <li>Generates a token using the primary secret (set in
-     *       {@link #setUp()}, decodes to 64 bytes / 512 bits).</li>
+     *       {@link #setUp()}, decodes to 64 bytes / 512 bits). The signing
+     *       algorithm in the token header is always {@code HS256} because
+     *       {@code JwtUtils.generateJwtToken} explicitly pins
+     *       {@code Jwts.SIG.HS256} on the {@code .signWith(...)} call,
+     *       irrespective of the underlying secret's byte length.</li>
      *   <li>Reflectively overrides the {@code jwtSecret} field to a
      *       different 64-byte / 512-bit Base64 secret with distinct byte
      *       content. Holding both secrets at the same 64-byte length tier
-     *       is required because JJWT 0.13's auto-algorithm-selection signs
-     *       the token with HS512 (driven by the 64-byte signing key); a
-     *       shorter verification key would trigger
-     *       {@code WeakKeyException} (uncaught by
-     *       {@link JwtUtils#validateJwtToken(String)}) instead of the
-     *       desired {@code SignatureException} path.</li>
+     *       is preserved from the original test design: a much shorter
+     *       verification key would trigger
+     *       {@link io.jsonwebtoken.security.WeakKeyException} during
+     *       {@link io.jsonwebtoken.security.Keys#hmacShaKeyFor(byte[])}
+     *       (uncaught by {@link JwtUtils#validateJwtToken(String)}) rather
+     *       than reaching the desired {@code SignatureException} path.</li>
+     *   <li>Clears the cached {@code signingKey} field so the next access
+     *       through {@code key()} re-derives a key from the just-assigned
+     *       {@code jwtSecret} value (see the cache-invalidation note in
+     *       the class-level Javadoc).</li>
      *   <li>Asks {@code validateJwtToken} to verify the previously-generated
      *       token using the new (different) key.</li>
      * </ol>
      *
-     * <p>Because {@link JwtUtils} re-derives the {@link javax.crypto.SecretKey}
-     * from the {@code jwtSecret} field on every call, the validation step
-     * uses the new (different) key, causing HMAC verification to fail.
+     * <p>The validation step pulls the freshly-derived key from the cache
+     * and HMAC verification fails because the token was signed with a
+     * different key.
      *
      * <p>The expected internal behavior is to catch
      * {@code io.jsonwebtoken.security.SignatureException} and return
@@ -283,6 +332,15 @@ class JwtUtilsTest {
         // WeakKeyException, on verification).
         ReflectionTestUtils.setField(jwtUtils, "jwtSecret",
                 "YW5vdGhlci1zZWNyZXQta2V5LWZvci10ZXN0aW5nLXNpZ25hdHVyZS1taXNtYXRjaC1zY2VuYXJpb3Mtb25seQ==");
+        // Clear the cached signing key so JwtUtils.key() re-derives from the
+        // newly assigned jwtSecret. Without this clear, validation would
+        // continue to use the old (cached) key and the token would
+        // incorrectly verify against itself. This pairs with the AAP
+        // §0.7.1.4 fail-fast caching introduced by the QA-driven fix to
+        // JwtUtils: the cache makes production traffic hot-path-friendly
+        // but requires explicit invalidation in tests that swap the
+        // configured secret mid-fixture.
+        ReflectionTestUtils.setField(jwtUtils, "signingKey", null);
         assertFalse(jwtUtils.validateJwtToken(token),
                 "Token signed with a different secret must validate as false");
     }
@@ -305,5 +363,44 @@ class JwtUtilsTest {
         String username = jwtUtils.getUserNameFromJwtToken(token);
         assertEquals("alice", username,
                 "Subject claim must equal the original username");
+    }
+
+    /**
+     * Regression test for QA Issue #3 (AAP &sect;0.1.1 algorithm contract).
+     *
+     * <p>The JWT header's {@code "alg"} claim must always be exactly
+     * {@code "HS256"}, regardless of how many bytes the operator-configured
+     * {@code jwt.secret} happens to decode to. Prior to the QA-driven fix,
+     * {@code JwtUtils.generateJwtToken} called the single-argument
+     * {@code .signWith(SecretKey)} variant, which delegates algorithm
+     * selection to JJWT 0.13's key-length heuristic and therefore upgraded
+     * the algorithm to {@code HS512} for any secret &ge; 64 bytes (the
+     * default {@code application.properties} secret happens to decode to
+     * 69 bytes). The fix pins {@code Jwts.SIG.HS256} explicitly on the
+     * two-argument {@code .signWith(SecretKey, MacAlgorithm)} variant,
+     * making the header deterministic.
+     *
+     * <p>The verification decodes the first segment of the
+     * compact-serialized JWT (the JOSE header) using the URL-safe Base64
+     * alphabet (RFC 7515 mandates Base64URL without padding for JWS
+     * segments), then asserts that the JSON contains the substring
+     * {@code "alg":"HS256"}. This is a string-level assertion rather than
+     * a JSON-AST assertion to avoid pulling in a JSON parser solely for
+     * this single test; the token's header is small (typically 16-30
+     * bytes after decoding) and the substring is sufficiently specific
+     * that false positives are not a concern.
+     */
+    @Test
+    void generateJwtToken_alwaysSignsWithHs256() {
+        Authentication auth = buildAuthentication("alguser");
+        String token = jwtUtils.generateJwtToken(auth);
+        String[] parts = token.split("\\.", -1);
+        assertEquals(3, parts.length,
+                "Token must have exactly three '.' separated segments (JWS structure)");
+        String headerJson = new String(
+                java.util.Base64.getUrlDecoder().decode(parts[0]),
+                java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(headerJson.contains("\"alg\":\"HS256\""),
+                "JWT header must declare alg=HS256 per AAP §0.1.1; was: " + headerJson);
     }
 }

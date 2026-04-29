@@ -18,6 +18,8 @@ import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import io.jsonwebtoken.security.WeakKeyException;
+import jakarta.annotation.PostConstruct;
 
 /**
  * Spring-managed component that encapsulates every interaction with the JJWT
@@ -56,10 +58,22 @@ import io.jsonwebtoken.security.Keys;
  * Base64-encoded byte string that <strong>must</strong> decode to at least 32
  * bytes (256 bits) per RFC 7518 &sect;3.2; shorter values cause
  * {@link Keys#hmacShaKeyFor(byte[])} to throw
- * {@code io.jsonwebtoken.security.WeakKeyException} on the first call to the
- * private {@link #key()} helper, providing a fail-fast guarantee. The
- * algorithm itself is auto-inferred by JJWT from the key length (no explicit
- * {@code SignatureAlgorithm} parameter is needed in the 0.12+ API).
+ * {@link WeakKeyException} during the {@link PostConstruct @PostConstruct}
+ * bean-initialization phase, providing the AAP &sect;0.7.1.4 startup
+ * fail-fast guarantee.
+ *
+ * <p>The algorithm is <strong>explicitly</strong> pinned to
+ * {@link Jwts.SIG#HS256} on every {@link #generateJwtToken(Authentication)
+ * sign} call. Pinning is essential because JJWT 0.13's single-argument
+ * {@code .signWith(SecretKey)} variant auto-derives the strongest secure
+ * HMAC algorithm from the key's byte length &mdash; a 64-byte secret would
+ * silently upgrade signing to HS512, a 48-byte secret to HS384, and only a
+ * 32-to-47-byte secret would yield HS256. AAP &sect;0.1.1 mandates HS256
+ * for this application, so the two-argument
+ * {@code .signWith(SecretKey, MacAlgorithm)} variant is used to guarantee
+ * the {@code "alg":"HS256"} JWT header regardless of how long the operator's
+ * configured secret happens to be (any length &ge; 32 bytes is accepted, but
+ * only the first 32 bytes contribute meaningful entropy to HS256).
  *
  * <p>HS256 was chosen over an asymmetric algorithm (RS256, ES256) because the
  * application is a single-process monolith: the same JVM signs and verifies
@@ -110,9 +124,13 @@ import io.jsonwebtoken.security.Keys;
  *   <li>The two configuration fields ({@link #jwtSecret} and
  *       {@link #jwtExpirationMs}) are populated once by Spring's
  *       property-source resolution at startup and are never reassigned.</li>
- *   <li>The {@link #key()} helper allocates a fresh {@link SecretKey} on
- *       each call, so no mutable cached state survives between
- *       invocations.</li>
+ *   <li>The cached {@link #signingKey} field is assigned exactly once by
+ *       {@link #init()} during {@link PostConstruct @PostConstruct}, before
+ *       any request thread can reach {@link #key()}. Spring's container
+ *       guarantees the bean is fully initialized before being made available
+ *       to consumers, providing the safe-publication semantics required for
+ *       lock-free reads from {@code signingKey} on every subsequent
+ *       request thread.</li>
  *   <li>The JJWT {@code JwtBuilder} and {@code JwtParser} types returned by
  *       {@link Jwts#builder()} and {@link Jwts#parser()} are themselves
  *       per-call objects; no shared parser is reused across threads.</li>
@@ -184,35 +202,106 @@ public class JwtUtils {
     private int jwtExpirationMs;
 
     /**
-     * Builds the HMAC-SHA-256 {@link SecretKey} used by JJWT to sign newly
-     * minted tokens and to verify the signature on incoming tokens.
+     * The HMAC {@link SecretKey} used by JJWT to sign newly minted tokens
+     * and to verify the signature on incoming tokens. The field is assigned
+     * exactly once by {@link #init()} during the
+     * {@link PostConstruct @PostConstruct} bean-initialization phase &mdash;
+     * after Spring has injected {@link #jwtSecret} but before any request
+     * thread can call into {@link #generateJwtToken(Authentication)},
+     * {@link #validateJwtToken(String)}, or
+     * {@link #getUserNameFromJwtToken(String)}.
      *
-     * <p>The method is invoked lazily on every call to
-     * {@link #generateJwtToken(Authentication)},
-     * {@link #getUserNameFromJwtToken(String)}, and
-     * {@link #validateJwtToken(String)}. Re-deriving the key per call (rather
-     * than caching it in a {@link jakarta.annotation.PostConstruct}-initialized
-     * field) keeps the implementation faithful to the canonical JJWT
-     * tutorial; the per-call cost &mdash; one Base64 decode plus a key
-     * wrapping &mdash; is microsecond-scale and entirely dominated by the
-     * surrounding HMAC computation.
+     * <p>Caching the derived key (rather than re-deriving it on every call)
+     * has two benefits:
+     * <ol>
+     *   <li><strong>Fail-fast at startup.</strong> If
+     *       {@link #jwtSecret} is missing, malformed, or too short to satisfy
+     *       RFC 7518 &sect;3.2, the failure surfaces at bean creation time
+     *       and Spring aborts the application context with a
+     *       {@code BeanCreationException} carrying the underlying
+     *       {@link WeakKeyException} or
+     *       {@link IllegalArgumentException}. Operators discover the
+     *       misconfiguration during deployment rather than at the first
+     *       login attempt &mdash; this is the AAP &sect;0.7.1.4
+     *       fail-fast guarantee.</li>
+     *   <li><strong>Hot-path efficiency.</strong> Token operations no longer
+     *       perform a Base64 decode plus key wrapping on every request;
+     *       only the HMAC computation itself remains.</li>
+     * </ol>
      *
-     * <p>{@link Keys#hmacShaKeyFor(byte[])} performs strict length validation:
-     * if the decoded byte array is shorter than 32 bytes (256 bits) it throws
-     * {@code io.jsonwebtoken.security.WeakKeyException}. This provides the
-     * fail-fast secret-strength guarantee described in AAP &sect;0.7.1.4.
+     * <p>The field is not {@code volatile} because Spring's container
+     * guarantees that bean initialization (including {@code @PostConstruct}
+     * methods) happens-before the bean is published to consumers, which is
+     * sufficient for safe publication of the immutable
+     * {@code SecretKeySpec}-style key reference produced by
+     * {@link Keys#hmacShaKeyFor(byte[])}.
+     */
+    private SecretKey signingKey;
+
+    /**
+     * Eagerly derives the HMAC {@link SecretKey} from {@link #jwtSecret} at
+     * bean-initialization time and caches it in {@link #signingKey}.
+     *
+     * <p>{@link Keys#hmacShaKeyFor(byte[])} performs strict length
+     * validation: if the decoded byte array is shorter than 32 bytes
+     * (256 bits) it throws {@link WeakKeyException}. By invoking
+     * {@code Keys.hmacShaKeyFor} from a {@link PostConstruct @PostConstruct}
+     * method &mdash; rather than lazily on the first token operation &mdash;
+     * the validation runs during Spring's bean-initialization phase, before
+     * the embedded Tomcat connector starts accepting traffic. A weak or
+     * malformed secret therefore aborts application startup with a
+     * {@code BeanCreationException}, satisfying the AAP &sect;0.7.1.4
+     * fail-fast contract that QA Issue #2 reported as deferred.
+     *
+     * <p>The method is package-private (default visibility) so that
+     * {@code @PostConstruct} can invoke it via reflection and so that
+     * adjacent test code in the same package can re-invoke it after
+     * reflectively mutating {@link #jwtSecret} or
+     * {@link #jwtExpirationMs}; it is intentionally NOT public to prevent
+     * accidental re-initialization from foreign packages.
+     *
+     * @throws WeakKeyException         if {@code jwtSecret} decodes to fewer
+     *                                  than 32 bytes (256 bits)
+     * @throws IllegalArgumentException if {@code jwtSecret} is {@code null},
+     *                                  empty, or not valid Base64
+     */
+    @PostConstruct
+    void init() {
+        this.signingKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
+    }
+
+    /**
+     * Returns the cached HMAC {@link SecretKey} for signing and verifying
+     * JWTs.
+     *
+     * <p>Under normal operation the key is populated by {@link #init()}
+     * during {@link PostConstruct @PostConstruct}, so this method is a
+     * trivial field read on the request hot path. To keep stand-alone unit
+     * tests &mdash; which instantiate {@code JwtUtils} via {@code new
+     * JwtUtils()} and reflectively assign {@link #jwtSecret} without going
+     * through Spring's bean lifecycle &mdash; correct, the method falls
+     * through to a one-time lazy derivation when {@link #signingKey} is
+     * still {@code null}. This dual-mode design preserves the AAP
+     * &sect;0.7.1.4 fail-fast guarantee for production while keeping the
+     * existing test fixtures functional.
      *
      * <p>The method is {@code private} because the {@link SecretKey} is an
      * implementation detail; no caller outside {@code JwtUtils} should be
      * able to retrieve, reuse, or stash the raw key material.
      *
-     * @return a fresh {@link SecretKey} suitable for HS256 signing and
+     * @return the cached {@link SecretKey} suitable for HS256 signing and
      *         verification
-     * @throws io.jsonwebtoken.security.WeakKeyException if {@code jwtSecret}
-     *         decodes to fewer than 32 bytes (256 bits)
+     * @throws WeakKeyException if {@code jwtSecret} decodes to fewer than
+     *         32 bytes (256 bits) AND the field has not yet been
+     *         initialized by {@link #init()}
      */
     private SecretKey key() {
-        return Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
+        SecretKey local = this.signingKey;
+        if (local == null) {
+            local = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
+            this.signingKey = local;
+        }
+        return local;
     }
 
     /**
@@ -234,9 +323,17 @@ public class JwtUtils {
      *       to the current wall-clock time.</li>
      *   <li>{@code .expiration(Date)} sets the {@code exp} registered claim
      *       to the current time plus {@link #jwtExpirationMs}.</li>
-     *   <li>{@code .signWith(Key)} signs the header and payload with the
-     *       symmetric key returned by {@link #key()}, auto-selecting HS256
-     *       based on the key length.</li>
+     *   <li>{@code .signWith(SecretKey, Jwts.SIG.HS256)} signs the header
+     *       and payload with the cached symmetric key returned by
+     *       {@link #key()} and <strong>explicitly</strong> pins the JWS
+     *       algorithm header to {@code HS256} per AAP &sect;0.1.1.
+     *       Without this explicit pinning, JJWT 0.13's algorithm
+     *       auto-detection would pick the strongest secure HMAC variant
+     *       supported by the key's byte length (HS384 for &ge; 48 bytes,
+     *       HS512 for &ge; 64 bytes), causing the token's
+     *       {@code "alg"} header to drift away from the documented HS256
+     *       contract whenever an operator configures a longer secret &mdash;
+     *       the exact defect QA Issue #3 reported.</li>
      *   <li>{@code .compact()} serializes the resulting JWS to its
      *       three-segment Base64URL string form
      *       ({@code header.payload.signature}).</li>
@@ -263,7 +360,7 @@ public class JwtUtils {
                 .subject(userPrincipal.getUsername())
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + jwtExpirationMs))
-                .signWith(key())
+                .signWith(key(), Jwts.SIG.HS256)
                 .compact();
     }
 

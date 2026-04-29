@@ -34,14 +34,21 @@ import lombok.NoArgsConstructor;
  *       {@link GenerationType#IDENTITY} strategy delegates auto-incrementing to the
  *       underlying database column.</li>
  *   <li>The {@code name} field is the {@link ERole} value persisted as a
- *       {@code VARCHAR(20)} string via
- *       {@link Enumerated @Enumerated(EnumType.STRING)}. Persisting the canonical
- *       name (e.g., {@code "ROLE_USER"}, {@code "ROLE_ADMIN"}) rather than the enum
- *       ordinal makes the schema robust against future reordering or insertion of
- *       constants in the {@link ERole} declaration: existing rows retain their
- *       semantic meaning even if the source-level constant order changes. The
- *       {@code length = 20} constraint replaces Hibernate's default {@code 255}
- *       and is comfortably sufficient for the {@code ROLE_*} naming scheme.</li>
+ *       {@code VARCHAR(20) NOT NULL} string via
+ *       {@link Enumerated @Enumerated(EnumType.STRING)} combined with
+ *       {@code @Column(nullable = false, length = 20,
+ *       columnDefinition = "VARCHAR(20) NOT NULL")}. Persisting the canonical
+ *       name (e.g., {@code "ROLE_USER"}, {@code "ROLE_ADMIN"}) rather than the
+ *       enum ordinal makes the schema robust against future reordering or
+ *       insertion of constants in the {@link ERole} declaration: existing rows
+ *       retain their semantic meaning even if the source-level constant order
+ *       changes. The {@code columnDefinition} explicitly forces a portable
+ *       {@code VARCHAR(20) NOT NULL} DDL fragment in place of Hibernate
+ *       6.x's default native-ENUM mapping (which would render the column as
+ *       {@code ENUM('ROLE_ADMIN', 'ROLE_USER')} on MySQL and on H2 in
+ *       MySQL-compatibility mode, with an implicit {@code NULLABLE} default
+ *       that the QA report flagged as a defense-in-depth gap). See the
+ *       Javadoc on {@link #name} for the full rationale.</li>
  * </ul>
  *
  * <h2>Lombok contract</h2>
@@ -91,12 +98,61 @@ public class Role {
 
     /**
      * The named authority encoded by this role row, persisted as the enum's
-     * canonical {@code name()} string in a {@code VARCHAR(20)} column. The
-     * {@link EnumType#STRING} mapping is intentional and must not be changed: see
-     * the class-level Javadoc and {@link ERole} for the rationale.
+     * canonical {@code name()} string in a {@code VARCHAR(20) NOT NULL} column.
+     * The {@link EnumType#STRING} mapping is intentional and must not be
+     * changed: see the class-level Javadoc and {@link ERole} for the
+     * rationale.
+     *
+     * <h3>Why {@code columnDefinition = "VARCHAR(20) NOT NULL"} is mandatory</h3>
+     *
+     * <p>Hibernate ORM 6.x changed its default DDL strategy for
+     * {@link EnumType#STRING}: when the underlying database supports a native
+     * {@code ENUM} column type (notably MySQL and H2 in MySQL compatibility
+     * mode), Hibernate emits a database-native {@code ENUM(...)} column
+     * declaration instead of {@code VARCHAR}. Without an explicit override,
+     * the {@code roles.name} column would therefore be created as
+     * {@code ENUM('ROLE_ADMIN', 'ROLE_USER')} on MySQL/H2, which deviates
+     * from the schema documented in AAP &sect;0.4.1.3
+     * (&quot;{@code name VARCHAR(20) NOT NULL}&quot;).
+     *
+     * <p>Even more importantly, the implicit native-ENUM mapping does not
+     * carry the {@code NOT NULL} constraint &mdash; verified by the QA test
+     * report which observed {@code IS_NULLABLE = YES} on the generated
+     * {@code roles.name} column. A {@code Role} row with
+     * {@code name = NULL} could therefore be inserted, after which
+     * {@code RoleRepository.findByName(ERole)} would never match and any
+     * downstream code that dereferences {@code role.getName().name()} (for
+     * example, {@code UserDetailsImpl.build} mapping roles to authorities)
+     * would throw {@link NullPointerException}.
+     *
+     * <p>The combination below enforces the AAP-specified schema exactly:
+     * <ul>
+     *   <li>{@code columnDefinition = "VARCHAR(20) NOT NULL"} forces
+     *       Hibernate to emit a portable {@code VARCHAR(20) NOT NULL} DDL
+     *       fragment for this column on every supported dialect (MySQL,
+     *       H2, PostgreSQL), bypassing the native-ENUM default. The
+     *       {@code NOT NULL} keyword is repeated inside the
+     *       {@code columnDefinition} as a defense-in-depth measure because
+     *       Hibernate consults {@code columnDefinition} verbatim once
+     *       set and does not always combine it with other column
+     *       attributes consistently across dialects.</li>
+     *   <li>{@code nullable = false} is also retained for symmetry with
+     *       the JPA-level metadata: it is read by {@code SchemaValidator}
+     *       and by {@code @Valid}-driven introspection paths even when
+     *       {@code columnDefinition} dominates DDL emission.</li>
+     *   <li>{@code length = 20} mirrors the documented schema bound and
+     *       remains a hint to JPA implementations and tooling even when
+     *       {@code columnDefinition} is set.</li>
+     * </ul>
+     *
+     * <p>The persisted strings remain the enum constants
+     * &quot;{@code ROLE_USER}&quot; and &quot;{@code ROLE_ADMIN}&quot;,
+     * exactly as before; only the underlying column type is forced to
+     * {@code VARCHAR(20)} instead of the database's native {@code ENUM}.
      */
     @Enumerated(EnumType.STRING)
-    @Column(length = 20)
+    @Column(name = "name", nullable = false, length = 20,
+            columnDefinition = "VARCHAR(20) NOT NULL")
     private ERole name;
 
     /**
@@ -109,10 +165,13 @@ public class Role {
      * Hibernate populates it on {@code save} via the {@code IDENTITY} generation
      * strategy declared on {@link #id}.
      *
-     * @param name the {@link ERole} constant to assign to the new role row; must
-     *             not be {@code null} when the entity is subsequently persisted,
-     *             because the underlying column has no explicit nullability
-     *             constraint but is logically required for any meaningful row.
+     * @param name the {@link ERole} constant to assign to the new role row;
+     *             must not be {@code null} when the entity is subsequently
+     *             persisted, because the underlying {@code roles.name}
+     *             column is declared {@code VARCHAR(20) NOT NULL} (see
+     *             {@link #name}). Passing a {@code null} value here and then
+     *             attempting to save the entity would surface a constraint
+     *             violation from the database driver.
      */
     public Role(ERole name) {
         this.name = name;
