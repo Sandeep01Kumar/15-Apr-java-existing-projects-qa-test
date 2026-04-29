@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -52,6 +53,10 @@ import io.jsonwebtoken.UnsupportedJwtException;
  *   <li>Spring's request-binding layer rejects an inbound payload via
  *       {@link MethodArgumentNotValidException} from a {@code @Valid}-annotated
  *       parameter;</li>
+ *   <li>Spring's request-body deserialiser raises
+ *       {@link HttpMessageNotReadableException} because the inbound payload
+ *       is not parseable JSON (or its declared {@code Content-Type} is
+ *       incompatible with the controller's {@code @RequestBody} contract);</li>
  *   <li>Spring's method-level security throws
  *       {@link AccessDeniedException} because a {@code @PreAuthorize}
  *       expression evaluated to {@code false}.</li>
@@ -344,6 +349,66 @@ public class GlobalExceptionHandler {
         log.error("Access denied: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
             .body(new MessageResponse("Access denied: insufficient permissions"));
+    }
+
+    /**
+     * Translates a {@link HttpMessageNotReadableException} into an HTTP 400
+     * (Bad Request) response with a constant client-facing message.
+     *
+     * <p>Spring's {@code RequestResponseBodyMethodProcessor} throws this
+     * exception whenever the inbound HTTP request body cannot be deserialised
+     * into the controller method's {@code @RequestBody} parameter. The most
+     * common triggers are:</p>
+     * <ul>
+     *   <li>Malformed JSON syntax (e.g. unclosed braces, trailing commas,
+     *       unescaped control characters);</li>
+     *   <li>An empty or missing request body when one is required;</li>
+     *   <li>A non-JSON {@code Content-Type} header on a payload that the
+     *       endpoint expects to be JSON;</li>
+     *   <li>A Jackson {@code JsonParseException} surfaced when the JSON token
+     *       stream is structurally invalid.</li>
+     * </ul>
+     *
+     * <p><strong>Why HTTP 400, not HTTP 500</strong> &mdash; the inability to
+     * deserialise the request body is a CLIENT error (the client sent
+     * something the server cannot parse). Returning HTTP 500 (which was the
+     * pre-fix behaviour, as the exception fell through to {@link #handleGeneric})
+     * mis-classifies the problem as a server-side fault, leading to incorrect
+     * monitoring/alerting signals and confusing client developers who would
+     * (correctly) interpret 500 as a server bug. The canonical HTTP semantics
+     * (RFC 9110 &sect;15.5.1) classify malformed request bodies as 400.</p>
+     *
+     * <p><strong>Security rationale</strong> &mdash; the response body is the
+     * constant string {@code "Malformed JSON request"}, NOT
+     * {@code ex.getMessage()}. The Jackson-generated message can include
+     * snippets of the offending payload, exception class names from the
+     * deserialiser, or path expressions revealing internal DTO field names.
+     * Echoing any of these would assist an attacker probing the API surface;
+     * the constant message keeps the externally-observable behaviour
+     * uniform regardless of the specific deserialisation failure mode. The
+     * full exception detail (class name and message) is logged server-side
+     * at ERROR level via SLF4J for operator debugging.</p>
+     *
+     * <p><strong>Coverage scope</strong> &mdash; this handler also catches
+     * Spring's {@code HttpMessageConversionException} subclasses (since
+     * {@code HttpMessageNotReadableException} extends
+     * {@code HttpMessageConversionException}) when they manifest as
+     * {@code HttpMessageNotReadableException}. The mirror-image
+     * {@code HttpMessageNotWritableException} is NOT handled here because it
+     * indicates a server-side serialisation failure (e.g. a circular reference
+     * in a response object), which correctly falls through to
+     * {@link #handleGeneric} and yields HTTP 500.</p>
+     *
+     * @param ex the {@link HttpMessageNotReadableException} thrown by Spring's
+     *           request-body deserialisation
+     * @return a {@link ResponseEntity} with HTTP status 400 and a
+     *         {@link MessageResponse} body containing the constant message
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<MessageResponse> handleHttpMessageNotReadable(HttpMessageNotReadableException ex) {
+        log.error("Malformed request body: {}: {}", ex.getClass().getSimpleName(), ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+            .body(new MessageResponse("Malformed JSON request"));
     }
 
     /**

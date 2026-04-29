@@ -14,6 +14,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfigurationSource;
 
 import com.jspider.spring_boot_simple_crud_with_mysql.security.jwt.AuthEntryPointJwt;
 import com.jspider.spring_boot_simple_crud_with_mysql.security.jwt.AuthTokenFilter;
@@ -115,13 +116,28 @@ import com.jspider.spring_boot_simple_crud_with_mysql.security.services.UserDeta
  * field-injection idiom keeps the class minimal and is documented in the
  * project's Agent Action Plan §0.7.1.1.</p>
  *
+ * <h2>CORS integration</h2>
+ *
+ * <p>The {@link CorsConfigurationSource} bean defined in the sibling
+ * {@code WebSecurityCorsConfig} class is field-injected here and wired into
+ * the security filter chain via
+ * {@code http.cors(cors -> cors.configurationSource(corsConfigurationSource))}.
+ * This is REQUIRED for cross-origin preflight {@code OPTIONS} requests to
+ * protected paths (e.g. {@code /product/**}, {@code /student/**}) to be
+ * processed by Spring Security's {@code CorsFilter} ahead of the authentication
+ * and authorization checks. Without this wiring, the security chain would
+ * reject preflight OPTIONS requests as unauthenticated (HTTP 401) before the
+ * Spring MVC layer's {@code @CrossOrigin} processing could examine them.</p>
+ *
  * <h2>Out-of-scope concerns</h2>
  *
  * <ul>
- *   <li>CORS configuration lives in {@code WebSecurityCorsConfig} (a sibling
- *       {@code @Configuration} class) and is not declared here. The two
- *       configurations are orthogonal and Spring Security composes them
- *       automatically when both beans are present in the context.</li>
+ *   <li>The detailed CORS policy (allowed origins, methods, headers,
+ *       credentials flag) is defined in {@code WebSecurityCorsConfig} as a
+ *       single-purpose {@code @Configuration} class. {@code SecurityConfig}
+ *       only consumes that bean &mdash; it does not redefine it &mdash; which
+ *       keeps the two concerns (CORS policy authoring vs. CORS filter
+ *       wiring) decoupled.</li>
  *   <li>Refresh-token logic, HTTPS configuration, rate limiting, and
  *       server-side logout are explicitly out of scope per AAP §0.6.2.</li>
  * </ul>
@@ -173,6 +189,39 @@ public class SecurityConfig {
      */
     @Autowired
     private AuthEntryPointJwt unauthorizedHandler;
+
+    /**
+     * Spring-managed {@link CorsConfigurationSource} bean produced by the
+     * sibling {@code WebSecurityCorsConfig @Configuration} class. Field-injected
+     * here and wired into the security filter chain via
+     * {@code http.cors(cors -> cors.configurationSource(corsConfigurationSource))}
+     * inside {@link #filterChain(HttpSecurity)}.
+     *
+     * <p>Without this wiring, Spring Security's filter chain would intercept
+     * cross-origin preflight {@code OPTIONS} requests targeting protected
+     * paths (notably {@code /product/**} and {@code /student/**}) BEFORE the
+     * Spring MVC layer's {@code @CrossOrigin} processing could examine them,
+     * causing the security chain to reject the preflight as unauthenticated
+     * (HTTP 401) instead of admitting it as a legitimate CORS handshake. By
+     * registering the {@link CorsConfigurationSource} on the
+     * {@link HttpSecurity} builder, Spring Security inserts its
+     * {@code CorsFilter} ahead of the authorization rules, which short-circuits
+     * the preflight evaluation with the canonical CORS response headers
+     * (i.e. {@code Access-Control-Allow-Origin}, {@code Access-Control-Allow-Methods},
+     * etc.) and HTTP 200, while leaving non-preflight requests subject to the
+     * full authentication and authorization pipeline.</p>
+     *
+     * <p>The {@link CorsConfigurationSource} bean itself is defined in
+     * {@code WebSecurityCorsConfig.corsConfigurationSource()} with
+     * {@code setAllowedOrigins("*")}, {@code setAllowedMethods("GET", "POST",
+     * "PUT", "DELETE", "OPTIONS")}, {@code setAllowedHeaders("*")}, and
+     * {@code setAllowCredentials(false)}. The {@code allowCredentials=false}
+     * setting is mandatory because Spring Security 6.x rejects
+     * {@code allowCredentials=true} combined with wildcard origins at
+     * application startup.</p>
+     */
+    @Autowired
+    private CorsConfigurationSource corsConfigurationSource;
 
     /**
      * Exposes the JWT extraction/validation filter as a Spring-managed
@@ -313,6 +362,13 @@ public class SecurityConfig {
      *       requests. Enabling CSRF here would force every POST/PUT/DELETE
      *       to carry a synchronizer token, which serves no security purpose
      *       in a header-authenticated API.</li>
+     *   <li><b>CORS wired into the chain</b> via
+     *       {@code http.cors(cors -> cors.configurationSource(corsConfigurationSource))}
+     *       so that Spring Security's {@code CorsFilter} processes preflight
+     *       {@code OPTIONS} requests before the authentication and
+     *       authorization checks fire. The {@link CorsConfigurationSource}
+     *       bean is provided by the sibling {@code WebSecurityCorsConfig}
+     *       class.</li>
      *   <li><b>Exception handling</b>. Authentication failures are routed
      *       to {@link AuthEntryPointJwt#commence}, which writes the
      *       canonical JSON 401 envelope.</li>
@@ -332,6 +388,13 @@ public class SecurityConfig {
      *             OpenAPI/Swagger documentation surface remains anonymously
      *             accessible per AAP §0.1.1 user requirement #7, preserving
      *             the project's pedagogical purpose.</li>
+     *         <li>{@code /error} &rarr; {@code permitAll()}: the
+     *             container-level error dispatch path (used by Spring
+     *             Boot's {@code BasicErrorController} when malformed
+     *             requests are caught by Tomcat's HTTP/1.1 parser before
+     *             reaching application code) must render the canonical
+     *             JSON error envelope without being blocked by the
+     *             security filter chain.</li>
      *         <li>{@code anyRequest()} &rarr; {@code authenticated()}:
      *             every other path (including all {@code /product/**} and
      *             {@code /student/**} endpoints) requires a valid JWT.
@@ -385,11 +448,25 @@ public class SecurityConfig {
         // Authorization header (not cookies). Re-enable CSRF if browser-cookie-based JWT
         // delivery is later adopted.
         http.csrf(csrf -> csrf.disable())
+            // CORS wired into the security filter chain so preflight OPTIONS requests
+            // to protected paths (e.g. /product/**, /student/**) are admitted by
+            // Spring Security's CorsFilter ahead of the authentication checks.
+            // The CorsConfigurationSource bean is supplied by WebSecurityCorsConfig
+            // with setAllowCredentials(false) and wildcard origins, satisfying both
+            // the CORS specification and Spring Security 6.x's startup validation.
+            .cors(cors -> cors.configurationSource(corsConfigurationSource))
             .exceptionHandling(ex -> ex.authenticationEntryPoint(unauthorizedHandler))
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                // /error must be permitAll() so that any container-level error
+                // dispatch (e.g. malformed URL caught by Tomcat's HTTP/1.1 parser
+                // that re-routes to the /error handler) is rendered as the
+                // structured JSON response produced by Spring's BasicErrorController
+                // (configured via server.error.* properties in application.properties)
+                // rather than being blocked by the security filter chain with a 401.
+                .requestMatchers("/error").permitAll()
                 .anyRequest().authenticated()
             );
 
