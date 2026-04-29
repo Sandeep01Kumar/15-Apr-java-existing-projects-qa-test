@@ -169,11 +169,16 @@ All previously-anonymous endpoints now require a valid JWT in the `Authorization
 
 | Operation Type        | Endpoints                                                                                                                                                                                                                                | Required Role               |
 |-----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------|
-| **Read**              | `GET /product/getTodayDate`, `GET /product/findAllProduct`, `GET /product/getProduct/{id}`, `GET /product/getProductByName/{name}`, `GET /product/getProductByPrice/{price}`, `GET /student/getTodayDate`, `GET /student/addition`        | `ROLE_USER` or `ROLE_ADMIN` |
-| **Write / Delete**    | `POST /product/saveProduct`, `POST /product/saveProducts`, `PUT /product/updateProduct`, `PUT /product/updateProduct/{id}`, `DELETE /product/deleteProductByPrice/{price}`                                                                | `ROLE_ADMIN` only           |
+| **Read**              | `GET /product/getTodayDate`, `GET /product/findAllProduct`, `GET /product/getProduct/{id}`, `GET /product/getProductByName/{name}`, `GET /product/getProductByPrice/{price}`, `GET /student/getTodayDate`, `POST /student/addition/{a1}/{b1}`        | `ROLE_USER` or `ROLE_ADMIN` |
+| **Write / Delete**    | `POST /product/saveProduct`, `POST /product/saveProducts`, `PUT /product/updateProduct/{id}`, `PUT /product/{id}`, `DELETE /product/deleteProductByPrice/{price}`                                                                | `ROLE_ADMIN` only           |
 
 - ❌ Unauthorized requests (no token, expired token, invalid signature) receive **HTTP 401 Unauthorized**
 - ⛔ Authenticated requests with insufficient role permissions receive **HTTP 403 Forbidden**
+
+📌 **Notes on the two `updateProduct` overloads** — both operate on the same `Product` entity payload but differ in response shape:
+- `PUT /product/updateProduct/{id}` returns the wrapped `ResponseStructure<Product>` envelope (matches the existing pre-security CRUD contract).
+- `PUT /product/{id}` returns a `ResponseEntity<Product>` with bare-product body and HTTP-status semantics (HTTP 200 on success, HTTP 404 if the id is unknown).
+Both endpoints require `ROLE_ADMIN` and accept a full `Product` JSON body.
 
 ---
 
@@ -238,6 +243,13 @@ curl -X POST http://localhost:8090/product/saveProduct \
   -H "Authorization: Bearer <admin-token>" \
   -H 'Content-Type: application/json' \
   -d '{"id":1,"name":"Pen","price":10.5}'
+```
+
+For the `/student/addition/{a1}/{b1}` endpoint (note: it is `POST`, not `GET`, and accepts the two operands as path variables; the response body is the integer sum, e.g. `8`):
+
+```bash
+curl -X POST -H "Authorization: Bearer <token>" \
+  http://localhost:8090/student/addition/5/3
 ```
 
 ---

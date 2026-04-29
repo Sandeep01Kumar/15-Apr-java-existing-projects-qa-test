@@ -95,24 +95,32 @@ import lombok.NoArgsConstructor;
  *       convention established by the existing
  *       {@code com.jspider.spring_boot_simple_crud_with_mysql.entity.Product}
  *       and {@code ...responses.ResponseStructure} classes.</li>
- *   <li>{@link NoArgsConstructor} is applied explicitly because Lombok's
- *       {@code @Data} suppresses its implicit {@code @RequiredArgsConstructor}
- *       contribution whenever any explicit constructor is declared on the
- *       class (per the Project Lombok specification at
- *       projectlombok.org/features/Data). Without this annotation, Jackson
- *       would have no public no-args constructor to invoke when
- *       deserialising a {@code JwtResponse} from a JSON response body in
- *       {@code AuthControllerIntegrationTest}, and the schema-required
- *       {@code JwtResponse()} member would be absent from the compiled
- *       class.</li>
- *   <li>An explicit five-argument constructor is provided in addition to the
- *       Lombok-generated no-args constructor; both coexist legally and
- *       provide complementary construction paths (the explicit constructor
- *       for production callers, the no-args constructor for Jackson). The
- *       explicit constructor deliberately omits a {@code type} parameter so
- *       that the {@code "Bearer"} field initializer is preserved in every
- *       successful login response without forcing every caller to pass the
- *       prefix literal.</li>
+ *   <li>{@link NoArgsConstructor} is applied <em>explicitly</em> because
+ *       Lombok 1.18.46's {@code @Data} (which expands to
+ *       {@code @RequiredArgsConstructor}) skips constructor generation
+ *       whenever an explicit constructor of any signature is declared on
+ *       the class &mdash; an empirical limitation verified against the
+ *       running Maven build (compiled bytecode of {@code JwtResponse.class}
+ *       contained only the explicit five-argument constructor and lacked a
+ *       zero-arg {@code <init>()} member when {@code @NoArgsConstructor}
+ *       was omitted, causing Jackson to raise
+ *       {@code InvalidDefinitionException: no Creators, like default
+ *       constructor, exist} during deserialisation). The explicit
+ *       {@code @NoArgsConstructor} therefore restores the public
+ *       zero-parameter constructor that Jackson requires for property-based
+ *       deserialisation in {@code AuthControllerIntegrationTest}, and the
+ *       schema-required {@code JwtResponse()} member is preserved in the
+ *       compiled class.</li>
+ *   <li>The explicit five-argument constructor coexists legally with the
+ *       Lombok-generated no-args constructor; the two signatures are
+ *       distinct, so neither suppresses the other. The explicit constructor
+ *       serves production callers ({@code AuthService.authenticate}) while
+ *       the no-args constructor serves Jackson deserialisation in
+ *       integration tests.</li>
+ *   <li>The explicit five-argument constructor deliberately omits a
+ *       {@code type} parameter so that the {@code "Bearer"} field
+ *       initializer is preserved in every successful login response without
+ *       forcing every caller to pass the prefix literal.</li>
  * </ul>
  *
  * <p>This class is intentionally a plain POJO: it carries no Spring stereotype
