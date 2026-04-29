@@ -6,6 +6,7 @@ import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,12 +23,14 @@ import com.jspider.spring_boot_simple_crud_with_mysql.responses.ResponseStructur
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
 @RestController
 @RequestMapping(value = "/product")
 @CrossOrigin(value = "")
 @Tag(name = "productcontroller", description = "this is controller class")
+@SecurityRequirement(name = "bearerAuth")
 public class ProductController {
 
 	@Autowired
@@ -36,12 +39,14 @@ public class ProductController {
 	@Autowired
 	ResponseStructure<Product> responseStructure;
 
+	@PreAuthorize("hasAnyRole('USER', 'ADMIN')")
 	@GetMapping(value = "/getTodayDate")
 	public String getTodaysDate() {
 
 		return LocalDate.now() + " ";
 	}
 
+	@PreAuthorize("hasRole('ADMIN')")
 	@PostMapping(value = "/saveProduct")
 	@Operation(description = "it will save one object at a time",
 	responses = {
@@ -72,6 +77,7 @@ public class ProductController {
 
 	}
 
+	@PreAuthorize("hasRole('ADMIN')")
 	@PostMapping(value = "/saveProducts")
 	public List<Product> saveProductController(@RequestBody List<Product> products) {
 
@@ -79,28 +85,33 @@ public class ProductController {
 		return productDao.saveMultipleProductDao(products);
 	}
 
+	@PreAuthorize("hasAnyRole('USER', 'ADMIN')")
 	@GetMapping(value = "/findAllProduct")
 	public List<Product> findAllProductController() {
 
 		return productDao.displayAllProductDao();
 	}
 
+	@PreAuthorize("hasAnyRole('USER', 'ADMIN')")
 	@GetMapping(value = "/getProduct/{id}")
 	public Product getProductByIdController(@PathVariable(name = "id") Integer id) {
 
 		return productDao.getProductByIdDao(id);
 	}
 
+	@PreAuthorize("hasAnyRole('USER', 'ADMIN')")
 	@GetMapping(value = "/getProductByName/{name}")
 	public List<Product> getProductByNameDao(@PathVariable(name = "name") String name) {
 		return productDao.getProductByNameDao(name);
 	}
 
+	@PreAuthorize("hasAnyRole('USER', 'ADMIN')")
 	@GetMapping(value = "/getProductByPrice/{price}")
 	public List<Product> getProductByPriceController(@PathVariable(name = "price") double price) {
 		return productDao.getProductByPriceDao(price);
 	}
 
+	@PreAuthorize("hasRole('ADMIN')")
 	@DeleteMapping(value = "/deleteProductByPrice/{price}")
 	public void deleteProductByPriceController(@PathVariable(name = "price") double price) {
 
@@ -111,6 +122,7 @@ public class ProductController {
 	
 	
 
+	@PreAuthorize("hasRole('ADMIN')")
 	@PutMapping(value = "/updateProduct/{id}")
 	@Operation(description = "it will update one object at a time",
 	responses = {
@@ -142,6 +154,7 @@ public class ProductController {
 	}
 
 	
+	@PreAuthorize("hasRole('ADMIN')")
 	@PutMapping("/{id}")
 	public ResponseEntity<Product> updateProduct(@RequestBody Product product, @PathVariable Integer id) {
 	    try {
