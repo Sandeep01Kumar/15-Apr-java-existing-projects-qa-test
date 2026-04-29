@@ -126,3 +126,246 @@ spring-boot-simple-crud-with-mysql
 
 
 
+---
+
+## 🔐 Authentication & Authorization
+
+🚀 The API now ships with a complete **JWT-based authentication and authorization layer** powered by Spring Security 6. All product and student endpoints are protected; clients must register, login, and present a Bearer token on every subsequent request.
+
+---
+
+### 🛡 Security Model Overview
+
+- ✅ **Stateless** authentication via signed **JSON Web Tokens (JWT)** — no server-side session storage, no `JSESSIONID` cookie
+- ✅ **Bearer token** delivery via the standard `Authorization` HTTP header (`Authorization: Bearer <token>`)
+- ✅ **Role-Based Access Control (RBAC)** with two roles: `ROLE_USER` and `ROLE_ADMIN`
+- ✅ The `ROLE_` prefix is **mandatory** per Spring Security convention — Spring auto-prepends `ROLE_` when evaluating `hasRole()` SpEL expressions, so use `hasRole('USER')` (NOT `hasRole('ROLE_USER')`) inside `@PreAuthorize`
+- ✅ All passwords are stored as **BCrypt hashes** (default strength 10) — plain-text passwords are NEVER persisted
+- ✅ Clients re-authenticate on every request via the token; expired or tampered tokens are rejected with HTTP 401
+- ✅ Token signing uses **HMAC-SHA-256 (HS256)** with a Base64-encoded secret of at least 256 bits (32 bytes) per RFC 7518 §3.2
+
+---
+
+### 🌍 Public Endpoints (No Authentication Required)
+
+| Method | Endpoint                | Description                                |
+|--------|-------------------------|--------------------------------------------|
+| POST   | `/api/auth/register`    | Register a new user                        |
+| POST   | `/api/auth/login`       | Authenticate and receive a JWT             |
+| GET    | `/v3/api-docs/**`       | OpenAPI 3.0 JSON documentation             |
+| GET    | `/swagger-ui/**`        | Swagger UI (interactive API explorer)      |
+| GET    | `/swagger-ui.html`      | Swagger UI entry page                      |
+
+---
+
+### 🔒 Protected Endpoints (JWT Bearer Token Required)
+
+All previously-anonymous endpoints now require a valid JWT in the `Authorization` header:
+
+- 🛒 All `/product/*` endpoints (10 endpoints under `ProductController`)
+- 🎓 All `/student/*` endpoints (2 endpoints under `StudentController`)
+
+#### 🧑‍🤝‍🧑 Role-Based Authorization Rules
+
+| Operation Type        | Endpoints                                                                                                                                                                                                                                | Required Role               |
+|-----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------|
+| **Read**              | `GET /product/getTodayDate`, `GET /product/findAllProduct`, `GET /product/getProduct/{id}`, `GET /product/getProductByName/{name}`, `GET /product/getProductByPrice/{price}`, `GET /student/getTodayDate`, `GET /student/addition`        | `ROLE_USER` or `ROLE_ADMIN` |
+| **Write / Delete**    | `POST /product/saveProduct`, `POST /product/saveProducts`, `PUT /product/updateProduct`, `PUT /product/updateProduct/{id}`, `DELETE /product/deleteProductByPrice/{price}`                                                                | `ROLE_ADMIN` only           |
+
+- ❌ Unauthorized requests (no token, expired token, invalid signature) receive **HTTP 401 Unauthorized**
+- ⛔ Authenticated requests with insufficient role permissions receive **HTTP 403 Forbidden**
+
+---
+
+### 📝 Example: Register a New User
+
+```bash
+curl -X POST http://localhost:8090/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","email":"alice@example.com","password":"secret123","role":["user"]}'
+```
+
+📌 **Notes**:
+- The `role` field is **optional**. If omitted, the user is automatically assigned `ROLE_USER`.
+- To create an admin, send `"role":["admin"]` (the lowercase strings `"user"` and `"admin"` are mapped to `ROLE_USER` / `ROLE_ADMIN` by `AuthService.register`).
+- Multiple roles can be combined: `"role":["user","admin"]`.
+
+**Successful response** (HTTP 200):
+
+```json
+{ "message": "User registered successfully!" }
+```
+
+---
+
+### 🔑 Example: Login and Receive a JWT
+
+```bash
+curl -X POST http://localhost:8090/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"secret123"}'
+```
+
+**Successful response** (HTTP 200):
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhbGljZSIsImlhdCI6MTcxNDQwMDAwMCwiZXhwIjoxNzE0NDg2NDAwfQ...",
+  "type": "Bearer",
+  "id": 1,
+  "username": "alice",
+  "email": "alice@example.com",
+  "roles": ["ROLE_USER"]
+}
+```
+
+The response contains a JWT in the `token` field along with the authenticated user's `id`, `username`, `email`, and `roles`.
+
+---
+
+### 🚀 Example: Authenticated Request to a Protected Endpoint
+
+Replace `<token>` with the JWT value received from the login endpoint:
+
+```bash
+curl -H "Authorization: Bearer <token>" http://localhost:8090/product/findAllProduct
+```
+
+For an admin-only operation:
+
+```bash
+curl -X POST http://localhost:8090/product/saveProduct \
+  -H "Authorization: Bearer <admin-token>" \
+  -H 'Content-Type: application/json' \
+  -d '{"id":1,"name":"Pen","price":10.5}'
+```
+
+---
+
+### ⚙ Configuration Properties
+
+The following `jwt.*` properties are added to `src/main/resources/application.properties`:
+
+```properties
+# JWT
+jwt.secret=ZGV2LWp3dC1zZWNyZXQta2V5LXJlcGxhY2UtaW4tcHJvZHVjdGlvbi13aXRoLTI1NmJpdC1obWFjLXNoYS0yNTYta2V5
+jwt.expiration=86400000
+jwt.header=Authorization
+jwt.prefix=Bearer 
+```
+
+| Property         | Description                                                                                                                                            | Default              |
+|------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------|
+| `jwt.secret`     | Base64-encoded HMAC-SHA-256 key (minimum 256 bits / 32 bytes per RFC 7518 §3.2). ⚠️ **Development placeholder — override in production.**              | (placeholder)        |
+| `jwt.expiration` | Token lifetime in milliseconds.                                                                                                                        | `86400000` (24 hrs)  |
+| `jwt.header`     | HTTP header name carrying the bearer token.                                                                                                            | `Authorization`      |
+| `jwt.prefix`     | Bearer-token prefix (note the trailing space).                                                                                                         | `Bearer `            |
+
+---
+
+### ⚠️ Production Hardening (CRITICAL Security Warning)
+
+> **⚠️ WARNING**: The default configuration is intended for **local development only**. Production deployments **MUST** apply the following hardening measures.
+
+#### 🔐 JWT Secret
+
+- Production deployments **MUST** override `jwt.secret` via the environment variable `JWT_SECRET`. Spring Boot maps the `JWT_SECRET` env-var to the `jwt.secret` property automatically (Relaxed Binding).
+- Alternative: store the secret in an external secret manager (HashiCorp Vault, AWS Secrets Manager, Azure Key Vault, GCP Secret Manager).
+- Generate a fresh 256-bit key and start the application:
+
+  ```bash
+  export JWT_SECRET=$(openssl rand -base64 32)
+  java -jar target/spring-boot-simple-crud-with-mysql-0.0.1-SNAPSHOT.jar
+  ```
+
+- 🚫 **Never commit production secrets to source control.** Never deploy with the default development placeholder.
+
+#### 🔒 TLS / HTTPS
+
+- The application listens on **plain HTTP (port 8090)** by default.
+- Production deployments **MUST terminate TLS** at an upstream reverse proxy (nginx, AWS ALB, Traefik, HAProxy, Caddy, etc.) because plain-HTTP transport of `Authorization: Bearer <token>` exposes tokens to **network sniffing, man-in-the-middle attacks, and replay attacks**.
+
+#### 🌐 CORS
+
+- The default CORS posture is permissive (`*` origins) to simplify development and Swagger UI usage.
+- Production deployments **should restrict** `allowedOrigins` to known frontend hostnames (e.g., `https://app.example.com`) and avoid combining `*` origins with `allowCredentials=true` (Spring Security 6 rejects this combination at startup).
+
+#### ⏱ Token Expiration
+
+- The default 24-hour token lifetime (`jwt.expiration=86400000`) is suitable for development.
+- Production deployments may consider **shorter expiration** (e.g., 1 hour = `3600000`) combined with a refresh-token strategy. Note: refresh-token issuance is **out of scope** for this implementation; clients must re-authenticate via `/api/auth/login` when the access token expires.
+
+#### 🛑 Additional Recommendations
+
+- Add **rate limiting** at the API gateway (e.g., `bucket4j-spring-boot-starter`, AWS API Gateway throttling) to mitigate brute-force login attacks.
+- Enable **request logging** and **audit trails** in production environments.
+- Rotate the JWT secret periodically; existing tokens become invalid on rotation, forcing clients to re-authenticate.
+- Consider deploying behind an API Gateway (Spring Cloud Gateway, Kong, AWS API Gateway) for centralized rate limiting, IP allow-listing, and observability.
+
+---
+
+### 🧪 Quick Smoke Test
+
+After starting the application, run the following sequence to verify the security layer end-to-end:
+
+```bash
+# 1. Verify protected endpoints reject unauthenticated requests (expect HTTP 401)
+curl -i http://localhost:8090/product/findAllProduct
+
+# 2. Register a new admin user
+curl -X POST http://localhost:8090/api/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","email":"alice@example.com","password":"secret123","role":["admin"]}'
+
+# 3. Login and capture the token
+TOKEN=$(curl -s -X POST http://localhost:8090/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"secret123"}' \
+  | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+
+# 4. Call a protected endpoint with the token (expect HTTP 200)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8090/product/findAllProduct
+```
+
+---
+
+### 📚 Component Reference
+
+| Component                          | Package                                                                | Responsibility                                          |
+|------------------------------------|------------------------------------------------------------------------|---------------------------------------------------------|
+| `SecurityConfig`                   | `com.jspider.spring_boot_simple_crud_with_mysql.security`              | Spring Security filter chain configuration              |
+| `JwtUtils`                         | `com.jspider.spring_boot_simple_crud_with_mysql.security.jwt`          | JWT generation, parsing, validation                     |
+| `AuthTokenFilter`                  | `com.jspider.spring_boot_simple_crud_with_mysql.security.jwt`          | Per-request JWT extraction and SecurityContext setup    |
+| `AuthEntryPointJwt`                | `com.jspider.spring_boot_simple_crud_with_mysql.security.jwt`          | HTTP 401 JSON response writer                           |
+| `UserDetailsServiceImpl`           | `com.jspider.spring_boot_simple_crud_with_mysql.security.services`     | Loads users by username for Spring Security             |
+| `UserDetailsImpl`                  | `com.jspider.spring_boot_simple_crud_with_mysql.security.services`     | Spring Security `UserDetails` adapter                   |
+| `User`, `Role`, `ERole`            | `com.jspider.spring_boot_simple_crud_with_mysql.entity`                | JPA entities for the identity domain                    |
+| `UserRepository`, `RoleRepository` | `com.jspider.spring_boot_simple_crud_with_mysql.repository`            | Spring Data JPA repositories                            |
+| `AuthService`                      | `com.jspider.spring_boot_simple_crud_with_mysql.service`               | Registration and login orchestration                    |
+| `AuthController`                   | `com.jspider.spring_boot_simple_crud_with_mysql.controller`            | REST endpoints for `/api/auth/*`                        |
+| `GlobalExceptionHandler`           | `com.jspider.spring_boot_simple_crud_with_mysql.exception`             | `@RestControllerAdvice`-based error translation         |
+| `LoginRequest`, `SignupRequest`    | `com.jspider.spring_boot_simple_crud_with_mysql.payload.request`       | Request DTOs                                            |
+| `JwtResponse`, `MessageResponse`   | `com.jspider.spring_boot_simple_crud_with_mysql.payload.response`      | Response DTOs                                           |
+
+---
+
+### 🔄 Authentication Flow
+
+1. **Register** → `POST /api/auth/register` with `{username, email, password, role}` → BCrypt-hashed password persisted to `users` table → `MessageResponse` returned.
+2. **Login** → `POST /api/auth/login` with `{username, password}` → Spring Security validates credentials via `DaoAuthenticationProvider` → `JwtUtils` issues a signed JWT → `JwtResponse` returned with `{token, type, id, username, email, roles}`.
+3. **Authenticated Request** → Client sends `Authorization: Bearer <token>` → `AuthTokenFilter` validates token → `SecurityContextHolder` populated with `UsernamePasswordAuthenticationToken` → `@PreAuthorize` checks role → controller method executes.
+4. **Token Expiration** → Server rejects expired tokens with HTTP 401 → Client must re-authenticate via `/api/auth/login` to obtain a fresh token.
+
+---
+
+### 📖 Interactive API Documentation
+
+Once the application is running, the OpenAPI / Swagger UI page is publicly accessible at:
+
+- **Swagger UI**: [http://localhost:8090/swagger-ui.html](http://localhost:8090/swagger-ui.html)
+- **OpenAPI JSON**: [http://localhost:8090/v3/api-docs](http://localhost:8090/v3/api-docs)
+
+The Swagger UI exposes an **🔒 Authorize** button (configured via `@SecurityScheme(name = "bearerAuth", ...)` on `SpringBootSimpleCrudWithMysqlApplication`). Click it, paste your JWT, and all subsequent "Try it out" requests against `/product/*` and `/student/*` endpoints automatically include the `Authorization: Bearer <token>` header.
+
+---
+
