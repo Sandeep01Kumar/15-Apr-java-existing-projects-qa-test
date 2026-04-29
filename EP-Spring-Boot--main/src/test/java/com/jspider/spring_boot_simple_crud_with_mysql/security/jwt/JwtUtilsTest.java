@@ -181,8 +181,10 @@ class JwtUtilsTest {
      * <p>This is the happy-path test: the secret used to sign the token and
      * the secret used to verify it are identical (because they are derived
      * from the same {@code jwtSecret} field), the signing and verifying
-     * algorithms match (HS256 in both cases), and the {@code exp} claim is
-     * one hour in the future.
+     * algorithms match (HS512 in both cases for this test's 64-byte key,
+     * because JJWT 0.13.x's {@code Jwts.builder().signWith(SecretKey)}
+     * auto-selects the strongest secure HMAC algorithm based on key size),
+     * and the {@code exp} claim is one hour in the future.
      */
     @Test
     void validateJwtToken_validToken_returnsTrue() {

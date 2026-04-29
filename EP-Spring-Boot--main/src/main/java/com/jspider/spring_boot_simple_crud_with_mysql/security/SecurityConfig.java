@@ -143,10 +143,10 @@ public class SecurityConfig {
      * {@code User} entity into Spring Security's
      * {@link org.springframework.security.core.userdetails.UserDetails}
      * contract. Injected into {@link #authenticationProvider() the
-     * authentication provider} via
-     * {@link DaoAuthenticationProvider#setUserDetailsService} to enable
-     * credential resolution against the database during the
-     * {@code POST /api/auth/login} flow.
+     * authentication provider} via the
+     * {@link DaoAuthenticationProvider#DaoAuthenticationProvider(org.springframework.security.core.userdetails.UserDetailsService)
+     * single-argument constructor} to enable credential resolution against
+     * the database during the {@code POST /api/auth/login} flow.
      *
      * <p>The field is typed against the concrete
      * {@link UserDetailsServiceImpl} class (rather than the
@@ -204,11 +204,16 @@ public class SecurityConfig {
      *
      * <p>The provider is wired with two collaborators:</p>
      * <ul>
-     *   <li>{@link #userDetailsService} via
-     *       {@link DaoAuthenticationProvider#setUserDetailsService}: used to
-     *       load the persisted {@code User} entity by its username column,
-     *       returning a {@code UserDetails} principal whose password hash
-     *       is then compared against the supplied plain-text password.</li>
+     *   <li>{@link #userDetailsService} via the
+     *       {@link DaoAuthenticationProvider#DaoAuthenticationProvider(org.springframework.security.core.userdetails.UserDetailsService)
+     *       single-argument constructor}: used to load the persisted
+     *       {@code User} entity by its username column, returning a
+     *       {@code UserDetails} principal whose password hash is then
+     *       compared against the supplied plain-text password. The
+     *       constructor-injection idiom is the canonical Spring Security
+     *       6.5+ pattern; the equivalent no-arg constructor combined with
+     *       {@code setUserDetailsService(...)} was deprecated in 6.5.x and
+     *       is anticipated to be removed in 7.x.</li>
      *   <li>{@link #passwordEncoder() passwordEncoder()} via
      *       {@link DaoAuthenticationProvider#setPasswordEncoder}: used to
      *       perform the constant-time BCrypt verification of the supplied
@@ -226,8 +231,7 @@ public class SecurityConfig {
      */
     @Bean
     public DaoAuthenticationProvider authenticationProvider() {
-        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider();
-        authProvider.setUserDetailsService(userDetailsService);
+        DaoAuthenticationProvider authProvider = new DaoAuthenticationProvider(userDetailsService);
         authProvider.setPasswordEncoder(passwordEncoder());
         return authProvider;
     }
